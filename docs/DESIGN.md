@@ -86,6 +86,7 @@ A `CustomerServiceOfficer`'s customer-detail edit is **not applied immediately**
 |---|---|
 | `Id` | Public id, `OPS-REV-XXXXXXXXXX`. |
 | `OriginalTransactionReference` | The `LedgerApi` `TXN-...` reference being reversed. |
+| `Amount`, `Currency` | Caller-supplied at request time — `LedgerApi` has no lookup-by-reference endpoint to derive these from (checked directly against its source; `TransactionResponse` doesn't even carry an amount), and the staff member filing the request already has these from whatever record prompted it. Mirrors `TransferRequest`/`AuthorizationRequest` already requiring the caller to supply amount/currency rather than deriving it from anywhere — not a new pattern. |
 | `ReasonCode` | One of `IdentityApi`'s existing `ReversalReasonCode` values (`DUPL`/`TECH`/`FRAD`/`CUST`/`UNAUTH`) — reused, not duplicated, since the eventual authorization call (5.3) needs exactly this vocabulary. |
 | `RequestedByStaffId` | Must hold `Teller` or `CustomerServiceOfficer` (4). |
 | `Status` | `PendingApproval` → `Approved`/`Rejected` → (once 5.4's gap is closed) `Executed`/`ExecutionFailed`. `Expired` after 24 hours in `PendingApproval` — longer than `IdentityApi`'s joint-approval 1-hour window (T-018), a deliberately different operational cadence: a live customer transfer approval is time-pressured, a staff review of a reversal is not. |
