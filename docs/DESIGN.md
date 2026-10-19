@@ -27,6 +27,23 @@ It owns **no truth of its own** about customers, products, money, or staff ident
 
 `POST /v1/ops/login` → calls `StaffIdentityApi POST /v1/staff/authenticate` (own service credential, scope `staffidentity.authenticate`). On success, creates an `OpsSession` row and sets a cookie containing only an opaque, random session token — never the `staffId` or `role` directly (OWASP Session Management Cheat Sheet, cited in T-026 Q3). On failure, returns `StaffIdentityApi`'s own generic `401` unchanged — no additional information added or removed.
 
+### 2.1a Two endpoints T-029 (the frontend) needs that this document didn't originally specify
+
+Found while designing the frontend, the same way T-028 itself surfaced real gaps while designing against T-027 — not invented scope, a genuine missing piece a caller needs:
+
+- **`GET /v1/ops/me`** — because the session cookie is `HttpOnly` by design (2.1 — the browser's JavaScript cannot read it), the frontend has no way to know who is logged in, or what role they hold, without asking. Every full page load (a refresh, a bookmarked URL) needs this to rebuild its UI state — it's not optional, the SPA is otherwise blind to its own login state. Returns `{staffId, fullName, role}` from the current session (2.2's cached fields — no downstream call), or `401` if the session cookie is missing/expired/revoked.
+- **`POST /v1/ops/logout`** — deletes the calling session's `OpsSession` row (the same cascade-revocation mechanism 2.3 already uses for a role/status change, just triggered by the staff member themselves) and clears the cookie.
+
+Neither needs a new scope or touches any downstream service — both are pure `OpsSession`-table operations.
+
+### 2.1b Same-origin hosting (decision #6) — resolves a real conflict with 2.2's `SameSite=Strict` choice
+
+**The conflict:** `SameSite=Strict` cookies (2.2, chosen on OWASP's own recommendation, T-026 Q3) are not sent on a cross-site request — if the frontend and `OpsApi` ever ended up on different domains (e.g. a separately-hosted static site calling an API on another domain), the login cookie would simply never reach `OpsApi` on any subsequent request, breaking the entire session mechanism this document already committed to. Relaxing to `SameSite=None` to work around that would reopen exactly the CSRF exposure `Strict` was chosen to close — walking back a considered decision to paper over a hosting choice, not a good trade.
+
+**Decision #6:** the ops console's built static assets are served by `OpsApi` itself, from the same origin — no second hosting resource, no CORS configuration anywhere, and `SameSite=Strict` works exactly as intended because there is no cross-site request to begin with. `OpsApi`'s own build needs `app.UseStaticFiles()` serving a dedicated folder (not `wwwroot`'s implicit root, to avoid any collision with anything else this API might ever serve from there) plus `MapFallbackToFile` for that folder's `index.html`, so a full-page load of any client-side route (e.g. a bookmarked `/reversals/OPS-REV-...`) still resolves to the React app rather than a `404` — standard SPA-hosting shape for ASP.NET Core, not a new pattern.
+
+**How two independently-deployed repos land on one origin:** the ops-console frontend repo (T-029) gets its **own** GitHub Actions deploy job, with its **own** scoped Azure credential — but deploying *into that same dedicated static-assets folder* on `OpsApi`'s already-running Azure Web App, via a plain zip/file deploy (no `dotnet publish`, nothing API-related), not by touching `OpsApi`'s own repository or build pipeline at all. The two deploy pipelines stay fully independent (matching this platform's existing one-repo-per-service convention) while still landing on one origin. **Local development:** Vite's dev server has a built-in reverse-proxy option (`server.proxy`) that forwards `/v1/ops/*` requests from its own dev port to a locally-running `OpsApi` — the browser sees same-origin requests throughout, in dev and in production alike, so no CORS code path needs to exist in `OpsApi` at all, in any environment.
+
 ### 2.2 `OpsSession` (own database table)
 
 | Field | Notes |
@@ -112,24 +129,25 @@ Per 1.1's dependency rule, only `OrchestratorApi` may call `LedgerApi`'s own `le
 
 All under `/v1/ops`, session-cookie-authenticated (2), each individually checked against Section 4's matrix. Not a line-by-line API spec (that's T-029's and the eventual build task's job) — the shape each v1 scope item takes:
 
+0. **Session** (2.1a) — `POST /v1/ops/login`, `GET /v1/ops/me`, `POST /v1/ops/logout`.
 1. **Customer & account lookup** — search/view, proxying `IdentityApi` (`identity.customer.read`) and `LedgerApi` (`ledger.read`) reads, combined into one response the frontend doesn't have to assemble from two calls itself.
 2. **Account/customer detail updates** — stages an `OpsCustomerEditRequest` (4.1); a separate approve/reject action applies it via `IdentityApi` (`identity.customer.write`).
-3. **Reversal requests** — create (5.1), list/queue (by role per 4), approve/reject (5.2), decided live against 5.4's current limit.
+3. **Reversal requests** — create (5.1), list/queue (by role per 4), approve/reject (5.2). Execution is live, not just authorized — `garbati-platform` D-14/T-030 built and live-verified `OrchestratorApi POST /v1/reversals` on 19 Oct 2026.
 4. **Transfer/transaction testing console** — account-opening and transfers via `OrchestratorApi` (`orchestrator.account-openings`/`.transfers`); funding directly via `LedgerApi` (3.4), `Teller`/`Supervisor` only.
 5. **Staff & role management** — thin pass-through to `StaffIdentityApi`'s own endpoints (create/list/role/status/supervisor), `Administrator`-only (4).
-6. **Joint-account approval test console** — thin pass-through to `IdentityApi`'s existing single-request lookup/approve endpoints, explicitly labeled in the UI as a stand-in for a real customer channel that does not exist yet (6.6.1) — useful for demo/QA, not a claim that staff normally approve a customer's own joint-account mandate action.
+6. **Joint-account approval test console** — thin pass-through to `IdentityApi`'s single-request lookup/approve endpoints, **now including a real browsable queue** (`garbati-platform` D-15/T-031 built `GET /v1/authorization/requests?status=Pending`, 19 Oct 2026 — 6.6.1's gap below is resolved), explicitly labeled in the UI as a stand-in for a real customer channel that does not exist yet — useful for demo/QA, not a claim that staff normally approve a customer's own joint-account mandate action.
 
-### 6.6.1 The second real gap this design surfaces: no queue, only lookup-by-id
+### 6.6.1 Resolved: IdentityApi now has a real queue, not just lookup-by-id
 
-`IdentityApi`'s `AuthorizationController` has `GET /v1/authorization/requests/{id}` (fetch one, by id) and nothing that lists multiple pending requests (confirmed directly against its source — no plain `[HttpGet]` list route exists). A "queue" with nothing to list is not a queue. **This is a genuine, minimal, read-only contract addition to `IdentityApi`** — not a judgment call this document can make unilaterally (API contract changes are an explicit human-only gate), so it is surfaced here as a proposed follow-up task rather than assumed. Until it exists, item 6's "test console" can only operate on a request id a caller already knows (e.g., one just created in the same session) — still useful for demo/QA purposes, just not a browsable queue.
+Originally: `IdentityApi`'s `AuthorizationController` only had `GET /v1/authorization/requests/{id}` (fetch one, by id) — nothing listed multiple pending requests, so a "queue" had nothing to browse. **Resolved by T-031** (merged, deployed, 19 Oct 2026): `GET /v1/authorization/requests?status=Pending&pageSize=&pageToken=`, reusing the existing scope, paged, correctly excluding single-holder requests (which never create the row type this reads) and stale-past-expiry rows. Item 6's test console can now show a real browsable queue, not just operate on a request id already known.
 
 ## 7. What "done" looks like for the first build task
 
-A follow-up task builds: `OpsSession`/`OpsReversalRequest`/`OpsCustomerEditRequest` EF Core entities and migrations, the four downstream `HttpClient`s with the exact scopes in Section 3, session cookie issuance/validation middleware, the Section 4 authorization matrix as enforcement (not just documentation), and the endpoints in Section 6. Tests cover: login/logout, idle/absolute session expiry, cascade revocation on role/status change (2.3), the reversal maker-checker hard rule (requester ≠ approver, approver must hold `Supervisor` at decision time, re-checked live), and the account-detail-edit equivalent (4.1).
+A follow-up task builds: `OpsSession`/`OpsReversalRequest`/`OpsCustomerEditRequest` EF Core entities and migrations, the four downstream `HttpClient`s with the exact scopes in Section 3, session cookie issuance/validation middleware, the Section 4 authorization matrix as enforcement (not just documentation), `app.UseStaticFiles()`/`MapFallbackToFile` for the frontend's assets (2.1b), and the endpoints in Section 6 (including `login`/`me`/`logout`, 2.1a). Tests cover: login/logout, `GET /v1/ops/me` on a missing/expired/revoked session, idle/absolute session expiry, cascade revocation on role/status change (2.3), the reversal maker-checker hard rule (requester ≠ approver, approver must hold `Supervisor` at decision time, re-checked live), and the account-detail-edit equivalent (4.1).
 
 ## 8. Open questions / explicitly deferred
 
-1. **Two real contract gaps found by this design, not yet scheduled as tasks:** `OrchestratorApi` needs a reversal-execution endpoint (5.4); `IdentityApi` needs a read-only "list pending authorization requests" endpoint (6.6.1). Both are new work on already-shipped services and both are proposed, not decided, by this document.
+1. **Both real contract gaps found by this design are now resolved.** `OrchestratorApi`'s reversal-execution endpoint (5.4) and `IdentityApi`'s pending-requests list endpoint (6.6.1) were both built, deployed, and live-verified 19 October 2026 (`garbati-platform` D-14/T-030, D-15/T-031).
 2. Whether `ComplianceOfficer`/`RiskOfficer` need any *write* access to the reversal queue (e.g., flagging a request for further review, distinct from approving it) — not in this version; Section 4 gives them read-only oversight only, which may prove insufficient once this is used for real.
 3. MFA for privileged actions (approving a reversal, editing a customer) — `Garbati.StaffIdentityApi/docs/DESIGN.md` flagged this without a concrete mechanism; still not designed here either.
 4. Session store today is `OpsApi`'s own Postgres database (sharing `LedgerApi`'s server, per the platform's existing cost-sharing convention) — fine at this scale; a distributed cache (Redis) would be the natural upgrade if `OpsApi` is ever horizontally scaled, not needed now.
