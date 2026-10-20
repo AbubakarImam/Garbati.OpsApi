@@ -10,11 +10,11 @@ public class TestingConsoleService(IOrchestratorApiClient orchestratorApiClient,
     : ITestingConsoleService
 {
     public async Task<AccountOpeningResponse> StartAccountOpeningAsync(
-        string fullName, string jurisdictionCode, string? customerReference, string? email, string? phoneNumber,
-        string accountName, string accountType, string currencyCode, CancellationToken cancellationToken)
+        string idempotencyKey, string fullName, string jurisdictionCode, string? customerReference, string? email,
+        string? phoneNumber, string accountName, string accountType, string currencyCode, CancellationToken cancellationToken)
     {
         var request = new OrchestratorContracts.StartAccountOpeningRequest(
-            $"ops:{Guid.NewGuid():N}", fullName, jurisdictionCode, customerReference, email, phoneNumber,
+            $"ops:{idempotencyKey}", fullName, jurisdictionCode, customerReference, email, phoneNumber,
             accountName, accountType, currencyCode);
 
         var response = await orchestratorApiClient.StartAccountOpeningAsync(request, cancellationToken);
@@ -25,11 +25,11 @@ public class TestingConsoleService(IOrchestratorApiClient orchestratorApiClient,
     }
 
     public async Task<TransferResultResponse> TransferAsync(
-        string requestedBy, string debitAccountId, string creditAccountId, decimal amount, string currency,
-        string? narration, CancellationToken cancellationToken)
+        string idempotencyKey, string requestedBy, string debitAccountId, string creditAccountId, decimal amount,
+        string currency, string? narration, CancellationToken cancellationToken)
     {
         var request = new OrchestratorContracts.TransferRequest(
-            $"ops:{Guid.NewGuid():N}", requestedBy, debitAccountId, creditAccountId, amount, currency, narration);
+            $"ops:{idempotencyKey}", requestedBy, debitAccountId, creditAccountId, amount, currency, narration);
 
         var response = await orchestratorApiClient.TransferAsync(request, cancellationToken);
 
@@ -37,10 +37,10 @@ public class TestingConsoleService(IOrchestratorApiClient orchestratorApiClient,
     }
 
     public async Task<FundingResultResponse> FundAsync(
-        string customerAccountNumber, decimal amount, string? narration, CancellationToken cancellationToken)
+        string idempotencyKey, string customerAccountNumber, decimal amount, string? narration, CancellationToken cancellationToken)
     {
         var request = new LedgerContracts.DepositRequest(
-            customerAccountNumber, amount, narration, $"ops:{Guid.NewGuid():N}");
+            customerAccountNumber, amount, narration, $"ops:{idempotencyKey}");
 
         var response = await ledgerApiClient.DepositAsync(request, cancellationToken);
 

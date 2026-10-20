@@ -2,6 +2,7 @@ using Garbati.OpsApi.Authorization;
 using Garbati.OpsApi.Contracts.Requests;
 using Garbati.OpsApi.Contracts.Responses;
 using Garbati.OpsApi.Services.Interfaces;
+using Garbati.OpsApi.Validation;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -17,9 +18,15 @@ public class TestingConsoleController(ITestingConsoleService testingConsoleServi
     public async Task<ActionResult<AccountOpeningResponse>> StartAccountOpening(
         [FromBody] StartAccountOpeningRequest request, CancellationToken cancellationToken)
     {
+        if (IdempotencyKeyRule.Validate(request.IdempotencyKey) is { } error)
+        {
+            return BadRequest(error);
+        }
+
         var response = await testingConsoleService.StartAccountOpeningAsync(
-            request.FullName, request.JurisdictionCode, request.CustomerReference, request.Email,
-            request.PhoneNumber, request.AccountName, request.AccountType, request.CurrencyCode, cancellationToken);
+            request.IdempotencyKey, request.FullName, request.JurisdictionCode, request.CustomerReference,
+            request.Email, request.PhoneNumber, request.AccountName, request.AccountType, request.CurrencyCode,
+            cancellationToken);
 
         return response.Status == "Failed" ? UnprocessableEntity(response) : Ok(response);
     }
@@ -28,9 +35,14 @@ public class TestingConsoleController(ITestingConsoleService testingConsoleServi
     public async Task<ActionResult<TransferResultResponse>> Transfer(
         [FromBody] TransferRequest request, CancellationToken cancellationToken)
     {
+        if (IdempotencyKeyRule.Validate(request.IdempotencyKey) is { } error)
+        {
+            return BadRequest(error);
+        }
+
         var response = await testingConsoleService.TransferAsync(
-            request.RequestedBy, request.DebitAccountId, request.CreditAccountId, request.Amount,
-            request.Currency, request.Narration, cancellationToken);
+            request.IdempotencyKey, request.RequestedBy, request.DebitAccountId, request.CreditAccountId,
+            request.Amount, request.Currency, request.Narration, cancellationToken);
 
         return response.Status == "Failed" ? UnprocessableEntity(response) : Ok(response);
     }
@@ -39,8 +51,13 @@ public class TestingConsoleController(ITestingConsoleService testingConsoleServi
     public async Task<ActionResult<FundingResultResponse>> Fund(
         [FromBody] FundingRequest request, CancellationToken cancellationToken)
     {
+        if (IdempotencyKeyRule.Validate(request.IdempotencyKey) is { } error)
+        {
+            return BadRequest(error);
+        }
+
         var response = await testingConsoleService.FundAsync(
-            request.CustomerAccountNumber, request.Amount, request.Narration, cancellationToken);
+            request.IdempotencyKey, request.CustomerAccountNumber, request.Amount, request.Narration, cancellationToken);
 
         return response.Status == "Failed" ? UnprocessableEntity(response) : Ok(response);
     }

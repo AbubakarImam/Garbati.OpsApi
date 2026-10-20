@@ -20,7 +20,7 @@ public class TestingConsoleTests(ApiFixture fixture)
         fixture.LedgerApiClient.DepositHandler = _ => new("TXN-1", "Posted");
 
         using var client = fixture.CreateClient();
-        using var response = await Send(client, token, "/v1/ops/console/funding", new FundingRequest("1000000001", 100m, null));
+        using var response = await Send(client, token, "/v1/ops/console/funding", new FundingRequest("1000000001", 100m, null, "fund-key-1"));
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<FundingResultResponse>();
@@ -42,7 +42,7 @@ public class TestingConsoleTests(ApiFixture fixture)
         var depositCallsBefore = fixture.LedgerApiClient.DepositCallCount;
 
         using var client = fixture.CreateClient();
-        using var response = await Send(client, token, "/v1/ops/console/funding", new FundingRequest("1000000001", 100m, null));
+        using var response = await Send(client, token, "/v1/ops/console/funding", new FundingRequest("1000000001", 100m, null, "fund-key-2"));
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         Assert.Equal(depositCallsBefore, fixture.LedgerApiClient.DepositCallCount);
@@ -59,7 +59,7 @@ public class TestingConsoleTests(ApiFixture fixture)
         using var client = fixture.CreateClient();
         using var response = await Send(
             client, token, "/v1/ops/console/transfers",
-            new TransferRequest("CUS-1", "1000000001", "1000000002", 50m, "NGN", null));
+            new TransferRequest("transfer-key-1", "CUS-1", "1000000001", "1000000002", 50m, "NGN", null));
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(transferCallsBefore + 1, fixture.OrchestratorApiClient.TransferCallCount);
@@ -76,9 +76,59 @@ public class TestingConsoleTests(ApiFixture fixture)
         using var client = fixture.CreateClient();
         using var response = await Send(
             client, token, "/v1/ops/console/account-openings",
-            new StartAccountOpeningRequest("Ada Lovelace", "NG", null, null, null, "Ada's Savings", "Savings", "NGN"));
+            new StartAccountOpeningRequest("opening-key-1", "Ada Lovelace", "NG", null, null, null, "Ada's Savings", "Savings", "NGN"));
 
         Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+    }
+
+    // QA review of PR #1 (T-033): the original build generated a fresh IdempotencyKey server-side on
+    // every call, which meant a browser retry (timeout, double-click) was indistinguishable from a brand
+    // new operation downstream - exactly the scenario idempotency keys exist to prevent. This asserts the
+    // actual captured value sent to the fake OrchestratorApi/LedgerApi clients matches the caller's own
+    // key (prefixed "ops:" for namespacing), not just that a call happened - the same kind of regression
+    // test T-024 showed is necessary for this class of bug.
+    [Fact]
+    public async Task Fund_ForwardsTheCallersIdempotencyKey_NotAFreshOnePerCall()
+    {
+        var token = await LoginAs("Teller");
+        fixture.LedgerApiClient.DepositHandler = _ => new("TXN-1", "Posted");
+
+        using var client = fixture.CreateClient();
+        using var response = await Send(client, token, "/v1/ops/console/funding", new FundingRequest("1000000001", 100m, null, "browser-retry-key"));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("ops:browser-retry-key", fixture.LedgerApiClient.LastDepositRequest!.IdempotencyKey);
+    }
+
+    [Fact]
+    public async Task Transfer_ForwardsTheCallersIdempotencyKey_NotAFreshOnePerCall()
+    {
+        var token = await LoginAs("Teller");
+        fixture.OrchestratorApiClient.TransferHandler = _ => new("DEC-1", "TXN-1", "Posted", null);
+
+        using var client = fixture.CreateClient();
+        using var response = await Send(
+            client, token, "/v1/ops/console/transfers",
+            new TransferRequest("browser-retry-key", "CUS-1", "1000000001", "1000000002", 50m, "NGN", null));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("ops:browser-retry-key", fixture.OrchestratorApiClient.LastTransferRequest!.IdempotencyKey);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("has a space")]
+    public async Task Fund_WithAMissingOrMalformedIdempotencyKey_Returns400_AndNeverCallsLedgerApi(string? key)
+    {
+        var token = await LoginAs("Teller");
+        var depositCallsBefore = fixture.LedgerApiClient.DepositCallCount;
+
+        using var client = fixture.CreateClient();
+        using var response = await Send(client, token, "/v1/ops/console/funding", new FundingRequest("1000000001", 100m, null, key!));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(depositCallsBefore, fixture.LedgerApiClient.DepositCallCount);
     }
 
     private async Task<string> LoginAs(string role)
