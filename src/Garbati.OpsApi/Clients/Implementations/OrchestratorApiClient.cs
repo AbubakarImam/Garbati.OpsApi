@@ -26,6 +26,15 @@ public class OrchestratorApiClient(HttpClient httpClient) : IOrchestratorApiClie
             response, "OrchestratorApi POST /v1/transfers", cancellationToken);
     }
 
+    // T-034. Route confirmed against Garbati.OrchestratorApi.Controllers.ReversalsController's live
+    // [Route] attribute, the same way StartAccountOpeningAsync/TransferAsync already were.
+    public async Task<ReversalResultResponse> ReverseAsync(ReversalRequest request, CancellationToken cancellationToken)
+    {
+        using var response = await httpClient.PostAsJsonAsync("v1/reversals", request, cancellationToken);
+        return await ReadBodyOrThrowAsync<ReversalResultResponse>(
+            response, "OrchestratorApi POST /v1/reversals", cancellationToken);
+    }
+
     // Reads the body on 200 OR 422 (a committed-but-failed result, same shape either way); only a
     // genuinely unexpected status throws.
     private static async Task<T> ReadBodyOrThrowAsync<T>(HttpResponseMessage response, string what, CancellationToken cancellationToken)

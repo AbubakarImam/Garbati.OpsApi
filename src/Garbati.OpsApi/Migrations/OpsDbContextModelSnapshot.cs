@@ -22,6 +22,147 @@ namespace Garbati.OpsApi.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Garbati.OpsApi.Entities.OpsCustomerEditRequest", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<string>("ApprovedByStaffId")
+                        .HasColumnType("text")
+                        .HasColumnName("approved_by_staff_id");
+
+                    b.Property<DateTimeOffset?>("DecidedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("decided_at");
+
+                    b.Property<string>("ProposedEmail")
+                        .HasColumnType("text")
+                        .HasColumnName("proposed_email");
+
+                    b.Property<string>("ProposedFullName")
+                        .HasColumnType("text")
+                        .HasColumnName("proposed_full_name");
+
+                    b.Property<string>("ProposedPhoneNumber")
+                        .HasColumnType("text")
+                        .HasColumnName("proposed_phone_number");
+
+                    b.Property<string>("RejectionReason")
+                        .HasColumnType("text")
+                        .HasColumnName("rejection_reason");
+
+                    b.Property<DateTimeOffset>("RequestedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("requested_at");
+
+                    b.Property<string>("RequestedByStaffId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("requested_by_staff_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<string>("TargetCustomerId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("target_customer_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_ops_customer_edit_requests");
+
+                    b.HasIndex("RequestedByStaffId")
+                        .HasDatabaseName("ix_ops_customer_edit_requests_requested_by_staff_id");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("ix_ops_customer_edit_requests_status");
+
+                    b.ToTable("ops_customer_edit_requests", (string)null);
+                });
+
+            modelBuilder.Entity("Garbati.OpsApi.Entities.OpsReversalRequest", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("numeric")
+                        .HasColumnName("amount");
+
+                    b.Property<string>("ApprovedByStaffId")
+                        .HasColumnType("text")
+                        .HasColumnName("approved_by_staff_id");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("currency");
+
+                    b.Property<DateTimeOffset?>("DecidedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("decided_at");
+
+                    b.Property<string>("ExecutedReference")
+                        .HasColumnType("text")
+                        .HasColumnName("executed_reference");
+
+                    b.Property<string>("ExecutionDetail")
+                        .HasColumnType("text")
+                        .HasColumnName("execution_detail");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("idempotency_key");
+
+                    b.Property<string>("OriginalTransactionReference")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("original_transaction_reference");
+
+                    b.Property<string>("ReasonCode")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("reason_code");
+
+                    b.Property<string>("RejectionReason")
+                        .HasColumnType("text")
+                        .HasColumnName("rejection_reason");
+
+                    b.Property<DateTimeOffset>("RequestedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("requested_at");
+
+                    b.Property<string>("RequestedByStaffId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("requested_by_staff_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.HasKey("Id")
+                        .HasName("pk_ops_reversal_requests");
+
+                    b.HasIndex("ApprovedByStaffId")
+                        .HasDatabaseName("ix_ops_reversal_requests_approved_by_staff_id");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("ix_ops_reversal_requests_status");
+
+                    b.HasIndex("RequestedByStaffId", "IdempotencyKey")
+                        .IsUnique()
+                        .HasDatabaseName("ix_ops_reversal_requests_requested_by_staff_id_idempotency_key");
+
+                    b.ToTable("ops_reversal_requests", (string)null);
+                });
+
             modelBuilder.Entity("Garbati.OpsApi.Entities.OpsSession", b =>
                 {
                     b.Property<long>("SessionId")

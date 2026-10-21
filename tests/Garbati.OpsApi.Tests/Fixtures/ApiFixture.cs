@@ -122,6 +122,39 @@ public class ApiFixture : IAsyncLifetime
         return await context.OpsSessions.CountAsync(s => s.StaffId == staffId);
     }
 
+    // T-034: simulates a role change landing between an earlier page load (e.g. when a Supervisor's queue
+    // was first displayed) and a later action against the same still-live session - the exact scenario the
+    // reversal/customer-edit maker-checker hard rule's "re-checked live, not cached" requirement guards
+    // against. Mutates the already-issued session's own cached Role directly, the same row
+    // SessionAuthenticationHandler re-reads fresh from the database on every single request.
+    public async Task SetSessionRoleAsync(string rawToken, string role)
+    {
+        var tokenHash = SessionTokenHasher.Hash(rawToken);
+        await using var context = CreateContext();
+        var session = await context.OpsSessions.SingleAsync(s => s.SessionTokenHash == tokenHash);
+        session.Role = role;
+        await context.SaveChangesAsync();
+    }
+
+    // T-034's lazy-expiry-aware listing tests: pushes a stored RequestedAt into the past, the same
+    // "artificially age a row directly in the database" approach CreateSessionDirectlyAsync already uses
+    // for session idle/absolute timeouts - no sleeping in a test for 24 real hours.
+    public async Task AgeReversalRequestAsync(string id, DateTimeOffset requestedAt)
+    {
+        await using var context = CreateContext();
+        var request = await context.OpsReversalRequests.SingleAsync(r => r.Id == id);
+        request.RequestedAt = requestedAt;
+        await context.SaveChangesAsync();
+    }
+
+    public async Task AgeCustomerEditRequestAsync(string id, DateTimeOffset requestedAt)
+    {
+        await using var context = CreateContext();
+        var request = await context.OpsCustomerEditRequests.SingleAsync(r => r.Id == id);
+        request.RequestedAt = requestedAt;
+        await context.SaveChangesAsync();
+    }
+
     public async Task DisposeAsync()
     {
         await Factory.DisposeAsync();

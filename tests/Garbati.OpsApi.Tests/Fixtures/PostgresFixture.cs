@@ -36,7 +36,8 @@ public class PostgresFixture : IAsyncLifetime
     public async Task ResetAsync()
     {
         await using var context = CreateContext();
-        await context.Database.ExecuteSqlRawAsync("TRUNCATE TABLE ops_sessions RESTART IDENTITY CASCADE");
+        await context.Database.ExecuteSqlRawAsync(
+            "TRUNCATE TABLE ops_sessions, ops_reversal_requests, ops_customer_edit_requests RESTART IDENTITY CASCADE");
     }
 }
 

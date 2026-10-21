@@ -7,12 +7,16 @@ public class FakeOrchestratorApiClient : IOrchestratorApiClient
 {
     public int StartAccountOpeningCallCount { get; private set; }
     public int TransferCallCount { get; private set; }
+    public int ReverseCallCount { get; private set; }
 
     public StartAccountOpeningRequest? LastStartAccountOpeningRequest { get; private set; }
     public TransferRequest? LastTransferRequest { get; private set; }
+    public ReversalRequest? LastReversalRequest { get; private set; }
 
     public Func<StartAccountOpeningRequest, AccountOpeningResponse>? StartAccountOpeningHandler { get; set; }
     public Func<TransferRequest, TransferResultResponse>? TransferHandler { get; set; }
+    public Func<ReversalRequest, ReversalResultResponse>? ReverseHandler { get; set; }
+    public Func<ReversalRequest, Exception>? ReverseThrows { get; set; }
 
     public Task<AccountOpeningResponse> StartAccountOpeningAsync(StartAccountOpeningRequest request, CancellationToken cancellationToken)
     {
@@ -30,6 +34,21 @@ public class FakeOrchestratorApiClient : IOrchestratorApiClient
         LastTransferRequest = request;
         var handler = TransferHandler ?? (r => new TransferResultResponse(
             $"DEC-FAKE{TransferCallCount:D7}", $"TXN-FAKE{TransferCallCount:D7}", "Posted", null));
+        return Task.FromResult(handler(request));
+    }
+
+    public Task<ReversalResultResponse> ReverseAsync(ReversalRequest request, CancellationToken cancellationToken)
+    {
+        ReverseCallCount++;
+        LastReversalRequest = request;
+
+        if (ReverseThrows?.Invoke(request) is { } ex)
+        {
+            throw ex;
+        }
+
+        var handler = ReverseHandler ?? (r => new ReversalResultResponse(
+            $"DEC-FAKE{ReverseCallCount:D7}", $"TXN-FAKE{ReverseCallCount:D7}", "Success", null));
         return Task.FromResult(handler(request));
     }
 }

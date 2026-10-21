@@ -35,4 +35,23 @@ public static class OpsRoles
     // DESIGN.md Section 4, "Joint-account approval test console": Supervisor acts, Auditor is read-only -
     // these two roles may both reach the read endpoints; only Supervisor may reach the approve action.
     public const string SupervisorOrAuditor = Supervisor + "," + Auditor;
+
+    // DESIGN.md Section 5, "Request a reversal": the create endpoint's own role check (garbati-platform
+    // T-034).
+    public const string TellerOrCustomerServiceOfficer = Teller + "," + CustomerServiceOfficer;
+
+    // DESIGN.md Section 5 / Section 4, "Reversal queue - read-only oversight" + "Request/Approve a
+    // reversal": the full set of roles allowed to CALL the list/get endpoints at all (garbati-platform
+    // T-034's controller-level gate). What each of them actually SEES is narrower, filtered in
+    // Services/Implementations/ReversalRequestService.cs - Teller/CustomerServiceOfficer: only their own;
+    // Supervisor: pending + personally decided; ComplianceOfficer/RiskOfficer/Auditor: everything, any
+    // status. Administrator is deliberately absent - not in Section 4's row for this action.
+    public const string ReversalQueueRoles = Teller + "," + CustomerServiceOfficer + "," + Supervisor + ","
+        + ComplianceOfficer + "," + RiskOfficer + "," + Auditor;
+
+    // DESIGN.md Section 4.1, "Update customer details": the ONLY two roles with any access at all to this
+    // endpoint group (garbati-platform T-034) - every other role, including Administrator, gets 403
+    // (task file, explicit - unlike reversals, there is no read-only-oversight row for ComplianceOfficer/
+    // RiskOfficer/Auditor on this one).
+    public const string CustomerServiceOfficerOrSupervisor = CustomerServiceOfficer + "," + Supervisor;
 }

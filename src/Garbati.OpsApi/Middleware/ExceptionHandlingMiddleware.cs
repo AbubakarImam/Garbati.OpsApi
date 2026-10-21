@@ -45,6 +45,11 @@ public class ExceptionHandlingMiddleware(RequestDelegate next, ILogger<Exception
 
     private static (int Status, string Title) Map(Exception ex) => ex switch
     {
+        // T-034: the two maker-checker workflows' own domain-rule exceptions (not a downstream call -
+        // raised by this service's own ReversalRequestService/CustomerEditRequestService).
+        OpsRequestNotFoundException => (StatusCodes.Status404NotFound, "The request was not found."),
+        OpsRequestNotPendingException => (StatusCodes.Status409Conflict, "This request is no longer pending."),
+        MakerCheckerViolationException => (StatusCodes.Status422UnprocessableEntity, "The maker-checker rule was violated."),
         DownstreamApiException downstream when downstream.StatusCode == StatusCodes.Status404NotFound
             => (StatusCodes.Status404NotFound, $"{downstream.ServiceName} reported not found."),
         DownstreamApiException downstream when downstream.StatusCode == StatusCodes.Status409Conflict

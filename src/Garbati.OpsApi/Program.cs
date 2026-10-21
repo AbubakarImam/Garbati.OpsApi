@@ -65,6 +65,8 @@ try
     builder.Services.AddScoped<ICustomerLookupService, CustomerLookupService>();
     builder.Services.AddScoped<ITestingConsoleService, TestingConsoleService>();
     builder.Services.AddScoped<IJointApprovalConsoleService, JointApprovalConsoleService>();
+    builder.Services.AddScoped<IReversalRequestService, ReversalRequestService>();
+    builder.Services.AddScoped<ICustomerEditRequestService, CustomerEditRequestService>();
 
     // This service as a client of all four downstream services (task file: "an HTTP client setup ...
     // configured with this service's own API key for each" - Garbati.OrchestratorApi's proven pattern,
