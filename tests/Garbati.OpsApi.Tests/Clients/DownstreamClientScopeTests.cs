@@ -24,14 +24,15 @@ public class DownstreamClientScopeTests
     }
 
     [Fact]
-    public void IOrchestratorApiClient_ExposesOnlyAccountOpeningsAndTransfers()
+    public void IOrchestratorApiClient_ExposesExactlyAccountOpeningsTransfersAndReversals()
     {
-        // DESIGN.md Section 3: orchestrator.account-openings + orchestrator.transfers - NOT
-        // orchestrator.reversals. T-034's job, not this task's.
+        // DESIGN.md Section 3: orchestrator.account-openings + orchestrator.transfers +
+        // orchestrator.reversals (T-034's own addition - ReverseAsync is this client's one new method,
+        // added deliberately for the reversal maker-checker workflow's Approved transition). A future
+        // change widening this further than these three should still be caught here.
         var methodNames = typeof(IOrchestratorApiClient).GetMethods().Select(m => m.Name).ToArray();
 
-        Assert.Equal(["StartAccountOpeningAsync", "TransferAsync"], methodNames);
-        Assert.DoesNotContain(methodNames, name => name.Contains("Reversal", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(["StartAccountOpeningAsync", "TransferAsync", "ReverseAsync"], methodNames);
     }
 
     [Fact]

@@ -39,4 +39,36 @@ public class OrchestratorApiClientTests
 
         Assert.Equal("http://orchestrator.invalid/v1/account-openings", handler.LastRequest!.RequestUri!.ToString());
     }
+
+    // T-034. Route confirmed against the real Garbati.OrchestratorApi.Controllers.ReversalsController's
+    // [Route] attribute.
+    [Fact]
+    public async Task ReverseAsync_SendsTheExpectedRoute()
+    {
+        var handler = new FakeHttpMessageHandler(HttpStatusCode.OK,
+            """{"decisionId":"DEC-1","reference":"TXN-1","status":"Success","failureReason":null}""");
+        var client = CreateClient(handler);
+
+        var request = new ReversalRequest("ops:OPS-REV-1", "STF-1", "TXN-ORIGINAL", 100m, "NGN", "DUPL");
+        await client.ReverseAsync(request, CancellationToken.None);
+
+        Assert.Equal("http://orchestrator.invalid/v1/reversals", handler.LastRequest!.RequestUri!.ToString());
+    }
+
+    // OrchestratorApi's own ReversalsController returns 200 or 422 for the exact same response shape,
+    // depending on Status (mirrors TransfersController exactly) - this client must read the body either
+    // way.
+    [Fact]
+    public async Task ReverseAsync_OnA422_StillReturnsTheBody()
+    {
+        var handler = new FakeHttpMessageHandler(HttpStatusCode.UnprocessableEntity,
+            """{"decisionId":"DEC-1","reference":"TXN-ORIGINAL","status":"Failed","failureReason":"insufficient funds"}""");
+        var client = CreateClient(handler);
+
+        var request = new ReversalRequest("ops:OPS-REV-1", "STF-1", "TXN-ORIGINAL", 100m, "NGN", "DUPL");
+        var response = await client.ReverseAsync(request, CancellationToken.None);
+
+        Assert.Equal("Failed", response.Status);
+        Assert.Equal("insufficient funds", response.FailureReason);
+    }
 }
