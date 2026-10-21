@@ -403,6 +403,48 @@ public class ReversalRequestsTests(ApiFixture fixture)
         Assert.Equal(HttpStatusCode.Conflict, approve.StatusCode);
     }
 
+    // QA review of PR #2: the task file's own spec is "Supervisor sees every PendingApproval request PLUS
+    // every request THEY'VE PERSONALLY DECIDED" - narrower than "every decided request." BuildVisibilityQuery
+    // implements this correctly by inspection (ApprovedByStaffId == staffId, not just != null), but nothing
+    // proved the negative case: a different Supervisor's already-decided request must NOT leak into this
+    // Supervisor's queue. Without this, "personally decided" could regress to "decided by anyone" with
+    // every other test in this file still green.
+    [Fact]
+    public async Task List_Supervisor_DoesNotSeeAnotherSupervisorsAlreadyDecidedRequest()
+    {
+        var (requesterToken, _) = await LoginAsAsync(OpsRoles.Teller);
+        using var client = fixture.CreateClient();
+        using var created = await Send(client, requesterToken, HttpMethod.Post, "/v1/ops/reversals",
+            new CreateReversalRequestRequest("rev-key-other-supervisor", "TXN-OTHERSUP", 10m, "NGN", "TECH"));
+        var id = (await created.Content.ReadFromJsonAsync<ReversalRequestResponse>())!.Id;
+
+        var (firstSupervisorToken, _) = await LoginAsAsync(OpsRoles.Supervisor);
+        fixture.OrchestratorApiClient.ReverseHandler =
+            r => new ReversalResultResponse("DEC-OTHERSUP-1", "TXN-OTHERSUP-R", "Success", null);
+        using var approve = await Send(client, firstSupervisorToken, HttpMethod.Post, $"/v1/ops/reversals/{id}/approve");
+        Assert.Equal(HttpStatusCode.OK, approve.StatusCode);
+
+        var (secondSupervisorToken, _) = await LoginAsAsync(OpsRoles.Supervisor);
+        using var list = await Send(client, secondSupervisorToken, HttpMethod.Get, "/v1/ops/reversals");
+        var listBody = await list.Content.ReadFromJsonAsync<List<ReversalRequestResponse>>();
+
+        Assert.DoesNotContain(listBody!, r => r.Id == id);
+
+        // Unlike the expiry case above (where GET-by-id deliberately stays visible despite list
+        // exclusion), this is a real role-visibility boundary, not a staleness exception - IsVisible
+        // returns false for the second Supervisor (Status is now Executed, not PendingApproval, and
+        // ApprovedByStaffId is the FIRST Supervisor's id), so GetAsync also returns null here -> 404.
+        using var get = await Send(client, secondSupervisorToken, HttpMethod.Get, $"/v1/ops/reversals/{id}");
+        Assert.Equal(HttpStatusCode.NotFound, get.StatusCode);
+
+        // Confirm the first Supervisor (who actually decided it) can still see it both ways.
+        using var ownList = await Send(client, firstSupervisorToken, HttpMethod.Get, "/v1/ops/reversals");
+        var ownListBody = await ownList.Content.ReadFromJsonAsync<List<ReversalRequestResponse>>();
+        Assert.Contains(ownListBody!, r => r.Id == id);
+        using var ownGet = await Send(client, firstSupervisorToken, HttpMethod.Get, $"/v1/ops/reversals/{id}");
+        Assert.Equal(HttpStatusCode.OK, ownGet.StatusCode);
+    }
+
     [Fact]
     public async Task List_ComplianceOfficer_StillSeesAnExpiredPendingRequest_FullOversightIsNeverFiltered()
     {
