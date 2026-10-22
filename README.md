@@ -30,10 +30,10 @@ This is OpsApi's **first** build task (`garbati-platform` T-033). It covers ever
 
 ## Getting started
 
-**1. Start PostgreSQL** (port `5436` - LedgerApi uses `5433`, IdentityApi `5434`, OrchestratorApi `5435`):
+**1. Start PostgreSQL** (port `5437` - LedgerApi uses `5433`, IdentityApi `5434`, OrchestratorApi `5435`, StaffIdentityApi `5436`):
 
 ```bash
-docker run -d --name opsapi-postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=opsapi -p 5436:5432 postgres:16-alpine
+docker run -d --name opsapi-postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=opsapi -p 5437:5432 postgres:16-alpine
 ```
 
 **2. Apply the migrations:**
