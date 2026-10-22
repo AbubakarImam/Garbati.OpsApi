@@ -99,6 +99,12 @@ All under `/v1/ops`, session-cookie-authenticated except login.
 
 `docs/DESIGN.md` Section 2.3, decision #2: whenever this service calls `StaffIdentityApi PATCH .../role` or `.../status` (via `StaffManagementService`), every active `OpsSession` row for that staff member is deleted in the same request, before returning success - the actual "instant revocation" mechanism. See `tests/Garbati.OpsApi.Tests/Controllers/CascadeRevocationTests.cs`.
 
+## Logging and audit
+
+Every request gets a correlation id (`X-Correlation-ID`), propagated to every downstream call this service makes to StaffIdentityApi/IdentityApi/OrchestratorApi/LedgerApi. Unlike every one of its sibling services, this one has **no durable audit table of its own** - a deliberate choice made when it was built (`docs/DESIGN.md` Section 2: session lifecycle events rely on the existing correlation-id-tagged Serilog request logs; whether that needs a durable, queryable audit trail of its own is still an open question, not silently decided here). The sensitive actions this service triggers *do* get audited - just in the sibling service that actually executes them (a reversal in LedgerApi/IdentityApi, a role change in StaffIdentityApi's own `staff_audit_logs`), not in a local table in this one.
+
+This is deliberately all GARBATI ships today - no metrics/tracing/alerting stack. See `garbati-platform`'s `OBSERVABILITY.md` for why, and what to reach for if you need more.
+
 ## Deployment
 
 ```bash
