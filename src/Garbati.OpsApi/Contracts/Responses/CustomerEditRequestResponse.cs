@@ -11,4 +11,5 @@ public record CustomerEditRequestResponse(
     string? ApprovedByStaffId,
     string? RejectionReason,
     DateTimeOffset RequestedAt,
-    DateTimeOffset? DecidedAt);
+    DateTimeOffset? DecidedAt,
+    string? ApplicationError);

@@ -84,5 +84,5 @@ public class CustomerEditRequestsController(ICustomerEditRequestService customer
 
     private static CustomerEditRequestResponse Map(OpsCustomerEditRequest r) => new(
         r.Id, r.TargetCustomerId, r.ProposedFullName, r.ProposedEmail, r.ProposedPhoneNumber, r.RequestedByStaffId,
-        r.Status, r.ApprovedByStaffId, r.RejectionReason, r.RequestedAt, r.DecidedAt);
+        r.Status, r.ApprovedByStaffId, r.RejectionReason, r.RequestedAt, r.DecidedAt, r.ApplicationError);
 }
