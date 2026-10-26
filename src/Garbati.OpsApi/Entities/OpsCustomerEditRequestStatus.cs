@@ -1,12 +1,13 @@
 namespace Garbati.OpsApi.Entities;
 
-// DESIGN.md Section 4.1 / garbati-platform T-034. The full lifecycle is defined now (matching the design's
-// "same shape [as OpsReversalRequest]" framing), but THIS task's own code never reaches Applied or
-// ApplicationFailed - Approved is this task's deliberate terminal state. Applying the change via
-// IdentityApi PATCH /v1/customers/{customerId}/details (garbati-platform T-035) is a small, separate
-// follow-up once that endpoint is confirmed built and deployed (see the PR description for whether T-035
-// had merged by the time this was written) - not this task's job. Expired follows the exact same lazy,
-// read-only-query-exclusion treatment as OpsReversalRequestStatus.Expired - never written here either.
+// DESIGN.md Section 4.1 / garbati-platform T-034/T-047. The full lifecycle was defined in T-034 (matching
+// the design's "same shape [as OpsReversalRequest]" framing), but T-034's own code never reached Applied
+// or ApplicationFailed - Approved was that task's deliberate terminal state, since IdentityApi PATCH
+// /v1/customers/{customerId}/details didn't exist yet. T-047 closes that gap:
+// CustomerEditRequestService.ApproveAsync now actually calls it and reaches Applied/ApplicationFailed, the
+// same way ReversalRequestService already reaches Executed/ExecutionFailed. Expired still follows the
+// exact same lazy, read-only-query-exclusion treatment as OpsReversalRequestStatus.Expired - never written
+// here either.
 public static class OpsCustomerEditRequestStatus
 {
     public const string PendingApproval = "PendingApproval";
