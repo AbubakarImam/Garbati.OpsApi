@@ -1,3 +1,4 @@
+using Garbati.OpsApi.Entities;
 using Garbati.OpsApi.Tests.Fixtures;
 using Microsoft.EntityFrameworkCore;
 
@@ -69,7 +70,45 @@ public class MigrationTests(PostgresFixture fixture)
 
         await AssertColumnsAsync(ctx, "ops_customer_edit_requests",
             "id", "target_customer_id", "proposed_full_name", "proposed_email", "proposed_phone_number",
-            "requested_by_staff_id", "status", "approved_by_staff_id", "rejection_reason", "requested_at", "decided_at");
+            "requested_by_staff_id", "status", "approved_by_staff_id", "rejection_reason", "requested_at",
+            "decided_at", "application_error");
+    }
+
+    // garbati-platform T-047: the real migrated schema has the new, additive, nullable column - not just
+    // EF's in-memory model. AppliedMigrations_IncludeAddReversalAndCustomerEditRequests above already
+    // proves the base table migration is applied; this proves the follow-up migration is too, and that an
+    // existing row (inserted with no value for the new column) gets NULL, not an error.
+    [Fact]
+    public async Task AppliedMigrations_IncludeAddCustomerEditApplicationError()
+    {
+        await using var ctx = fixture.CreateContext();
+
+        var applied = await ctx.Database.GetAppliedMigrationsAsync();
+
+        Assert.Contains(applied, m => m.EndsWith("AddCustomerEditApplicationError"));
+    }
+
+    [Fact]
+    public async Task OpsCustomerEditRequestsTable_ApplicationErrorColumn_IsNullableAndDefaultsToNullOnExistingRows()
+    {
+        await using var ctx = fixture.CreateContext();
+        ctx.OpsCustomerEditRequests.Add(new OpsCustomerEditRequest
+        {
+            Id = "OPS-EDIT-MIGTEST0001",
+            TargetCustomerId = "CUS-MIGTEST",
+            ProposedFullName = "Migration Test",
+            RequestedByStaffId = "STF-MIGTEST",
+            Status = OpsCustomerEditRequestStatus.PendingApproval,
+            RequestedAt = DateTimeOffset.UtcNow,
+            // ApplicationError deliberately left unset - this is the "existing row" case the task file asks
+            // this migration test to prove.
+        });
+        await ctx.SaveChangesAsync();
+
+        await using var readCtx = fixture.CreateContext();
+        var reloaded = await readCtx.OpsCustomerEditRequests.SingleAsync(r => r.Id == "OPS-EDIT-MIGTEST0001");
+
+        Assert.Null(reloaded.ApplicationError);
     }
 
     // ReversalRequestService.CreateAsync's own retry-safety (IdempotencyIndexName) depends on this exact

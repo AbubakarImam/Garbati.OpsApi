@@ -1,14 +1,18 @@
 using System.Net;
 using System.Net.Http.Json;
 using Garbati.OpsApi.Authorization;
+using Garbati.OpsApi.Clients.Contracts.Identity;
 using Garbati.OpsApi.Contracts.Requests;
 using Garbati.OpsApi.Contracts.Responses;
+using Garbati.OpsApi.Exceptions;
 using Garbati.OpsApi.Tests.Fixtures;
 
 namespace Garbati.OpsApi.Tests.Controllers;
 
-// DESIGN.md Section 4.1 (garbati-platform T-034) - STOPS at Approved in this task. Every test here that
-// reaches Approve also confirms the fake IIdentityApiClient was never touched (task file, explicit).
+// DESIGN.md Section 4.1 (garbati-platform T-034/T-047). T-034 stopped at Approved; T-047 (this file's
+// Approve tests below) closes that gap - Approve now actually calls the fake IIdentityApiClient and
+// reaches Applied/ApplicationFailed, mirroring ReversalRequestsTests' own Approve coverage for the
+// execution-call shape.
 [Collection("Api")]
 public class CustomerEditRequestsTests(ApiFixture fixture)
 {
@@ -134,10 +138,12 @@ public class CustomerEditRequestsTests(ApiFixture fixture)
 
         var approverToken = await fixture.CreateSessionDirectlyAsync(
             staffId, "Self Approver", OpsRoles.Supervisor, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddHours(8));
+        var callsBefore = fixture.IdentityApiClient.UpdateCustomerDetailsCallCount;
 
         using var response = await Send(client, approverToken, HttpMethod.Post, $"/v1/ops/customer-edits/{id}/approve");
 
         Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        Assert.Equal(callsBefore, fixture.IdentityApiClient.UpdateCustomerDetailsCallCount);
     }
 
     [Fact]
@@ -150,9 +156,11 @@ public class CustomerEditRequestsTests(ApiFixture fixture)
         var id = (await created.Content.ReadFromJsonAsync<CustomerEditRequestResponse>())!.Id;
 
         var (otherCsoToken, _) = await LoginAsAsync(OpsRoles.CustomerServiceOfficer);
+        var callsBefore = fixture.IdentityApiClient.UpdateCustomerDetailsCallCount;
         using var response = await Send(client, otherCsoToken, HttpMethod.Post, $"/v1/ops/customer-edits/{id}/approve");
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(callsBefore, fixture.IdentityApiClient.UpdateCustomerDetailsCallCount);
     }
 
     [Fact]
@@ -166,10 +174,12 @@ public class CustomerEditRequestsTests(ApiFixture fixture)
 
         var (approverToken, _) = await LoginAsAsync(OpsRoles.Supervisor);
         await fixture.SetSessionRoleAsync(approverToken, OpsRoles.CustomerServiceOfficer);
+        var callsBefore = fixture.IdentityApiClient.UpdateCustomerDetailsCallCount;
 
         using var response = await Send(client, approverToken, HttpMethod.Post, $"/v1/ops/customer-edits/{id}/approve");
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(callsBefore, fixture.IdentityApiClient.UpdateCustomerDetailsCallCount);
     }
 
     [Fact]
@@ -188,19 +198,15 @@ public class CustomerEditRequestsTests(ApiFixture fixture)
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
-    // This task's core boundary, stated explicitly in the PR: this workflow never calls IdentityApi, even
-    // on a successful approval. Task file: "assert the fake IIdentityApiClient's relevant call count
-    // stays zero throughout."
+    // T-047's core behaviour: Approve now actually calls IdentityApi and reaches Applied, not just
+    // Approved. Confirms the exact customerId/FullName/Email/PhoneNumber the fake client was called with,
+    // mirroring ReversalRequestsTests.Approve_CallsOrchestratorApi_...'s own "assert the exact downstream
+    // call" shape.
     [Fact]
-    public async Task Approve_Succeeds_StopsAtApproved_AndNeverCallsIdentityApi()
+    public async Task Approve_Succeeds_CallsIdentityApi_AndReachesApplied()
     {
         var (requesterToken, requesterId) = await LoginAsAsync(OpsRoles.CustomerServiceOfficer);
         using var client = fixture.CreateClient();
-
-        var getCustomerCallsBefore = fixture.IdentityApiClient.GetCustomerCallCount;
-        var listPendingCallsBefore = fixture.IdentityApiClient.ListPendingCallCount;
-        var getAuthorizationCallsBefore = fixture.IdentityApiClient.GetAuthorizationRequestCallCount;
-        var approveCallsBefore = fixture.IdentityApiClient.ApproveCallCount;
 
         using var created = await Send(client, requesterToken, HttpMethod.Post, "/v1/ops/customer-edits",
             new CreateCustomerEditRequestRequest("CUS-FULL", "New Full Name", "new@example.test", "+2348000000000"));
@@ -211,19 +217,93 @@ public class CustomerEditRequestsTests(ApiFixture fixture)
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<CustomerEditRequestResponse>();
-        Assert.Equal("Approved", body!.Status);
+        Assert.Equal("Applied", body!.Status);
+        Assert.Null(body.ApplicationError);
         Assert.Equal(approverId, body.ApprovedByStaffId);
         Assert.Equal(requesterId, body.RequestedByStaffId);
         Assert.Equal("New Full Name", body.ProposedFullName);
         Assert.Equal("new@example.test", body.ProposedEmail);
         Assert.Equal("+2348000000000", body.ProposedPhoneNumber);
 
-        // Nothing about this workflow ever touched IdentityApi - every counter is exactly where it was
-        // before this test's own create+approve calls ran.
-        Assert.Equal(getCustomerCallsBefore, fixture.IdentityApiClient.GetCustomerCallCount);
-        Assert.Equal(listPendingCallsBefore, fixture.IdentityApiClient.ListPendingCallCount);
-        Assert.Equal(getAuthorizationCallsBefore, fixture.IdentityApiClient.GetAuthorizationRequestCallCount);
-        Assert.Equal(approveCallsBefore, fixture.IdentityApiClient.ApproveCallCount);
+        var (calledCustomerId, calledRequest) = fixture.IdentityApiClient.LastUpdateCustomerDetailsCall!.Value;
+        Assert.Equal("CUS-FULL", calledCustomerId);
+        Assert.Equal("New Full Name", calledRequest.FullName);
+        Assert.Equal("new@example.test", calledRequest.Email);
+        Assert.Equal("+2348000000000", calledRequest.PhoneNumber);
+    }
+
+    // Task file: "any exception - not just a 422 business-rule failure - is still ApplicationFailed... the
+    // error recorded is a clear, specific message." Approval itself (ApprovedByStaffId/DecidedAt) still
+    // happened, same as ReversalRequestsTests.Approve_WhenOrchestratorApiCallThrows_... for reversals.
+    [Fact]
+    public async Task Approve_WhenIdentityApiCallThrows_StoresApplicationFailed_NotA500()
+    {
+        var (requesterToken, _) = await LoginAsAsync(OpsRoles.CustomerServiceOfficer);
+        using var client = fixture.CreateClient();
+        using var created = await Send(client, requesterToken, HttpMethod.Post, "/v1/ops/customer-edits",
+            new CreateCustomerEditRequestRequest("CUS-THROWS", "Name Throws", null, null));
+        var id = (await created.Content.ReadFromJsonAsync<CustomerEditRequestResponse>())!.Id;
+
+        var (approverToken, approverId) = await LoginAsAsync(OpsRoles.Supervisor);
+        fixture.IdentityApiClient.UpdateCustomerDetailsThrows =
+            (_, _) => new DownstreamApiException("IdentityApi", 500, "boom");
+
+        using var response = await Send(client, approverToken, HttpMethod.Post, $"/v1/ops/customer-edits/{id}/approve");
+        fixture.IdentityApiClient.UpdateCustomerDetailsThrows = null;
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<CustomerEditRequestResponse>();
+        Assert.Equal("ApplicationFailed", body!.Status);
+        Assert.NotNull(body.ApplicationError);
+        Assert.Contains("500", body.ApplicationError);
+        Assert.Contains("IdentityApi", body.ApplicationError);
+        // Approval itself still happened, even though applying it failed.
+        Assert.Equal(approverId, body.ApprovedByStaffId);
+        Assert.NotNull(body.DecidedAt);
+    }
+
+    // Task file: "a second ApproveAsync call against an already-Applied (or ApplicationFailed) request
+    // still throws OpsRequestNotPendingException" - confirms EnsureDecidable's existing
+    // "Status != PendingApproval" check already covers both new terminal states with no code change there.
+    [Fact]
+    public async Task Approve_AlreadyAppliedRequest_Returns409()
+    {
+        var (requesterToken, _) = await LoginAsAsync(OpsRoles.CustomerServiceOfficer);
+        using var client = fixture.CreateClient();
+        using var created = await Send(client, requesterToken, HttpMethod.Post, "/v1/ops/customer-edits",
+            new CreateCustomerEditRequestRequest("CUS-TWICE-APPLIED", "Name Twice", null, null));
+        var id = (await created.Content.ReadFromJsonAsync<CustomerEditRequestResponse>())!.Id;
+
+        var (firstApproverToken, _) = await LoginAsAsync(OpsRoles.Supervisor);
+        using var firstApprove = await Send(client, firstApproverToken, HttpMethod.Post, $"/v1/ops/customer-edits/{id}/approve");
+        Assert.Equal("Applied", (await firstApprove.Content.ReadFromJsonAsync<CustomerEditRequestResponse>())!.Status);
+
+        var (secondApproverToken, _) = await LoginAsAsync(OpsRoles.Supervisor);
+        using var secondApprove = await Send(client, secondApproverToken, HttpMethod.Post, $"/v1/ops/customer-edits/{id}/approve");
+
+        Assert.Equal(HttpStatusCode.Conflict, secondApprove.StatusCode);
+    }
+
+    [Fact]
+    public async Task Approve_AlreadyApplicationFailedRequest_Returns409()
+    {
+        var (requesterToken, _) = await LoginAsAsync(OpsRoles.CustomerServiceOfficer);
+        using var client = fixture.CreateClient();
+        using var created = await Send(client, requesterToken, HttpMethod.Post, "/v1/ops/customer-edits",
+            new CreateCustomerEditRequestRequest("CUS-TWICE-FAILED", "Name Twice Failed", null, null));
+        var id = (await created.Content.ReadFromJsonAsync<CustomerEditRequestResponse>())!.Id;
+
+        var (firstApproverToken, _) = await LoginAsAsync(OpsRoles.Supervisor);
+        fixture.IdentityApiClient.UpdateCustomerDetailsThrows =
+            (_, _) => new DownstreamApiException("IdentityApi", 500, "boom");
+        using var firstApprove = await Send(client, firstApproverToken, HttpMethod.Post, $"/v1/ops/customer-edits/{id}/approve");
+        fixture.IdentityApiClient.UpdateCustomerDetailsThrows = null;
+        Assert.Equal("ApplicationFailed", (await firstApprove.Content.ReadFromJsonAsync<CustomerEditRequestResponse>())!.Status);
+
+        var (secondApproverToken, _) = await LoginAsAsync(OpsRoles.Supervisor);
+        using var secondApprove = await Send(client, secondApproverToken, HttpMethod.Post, $"/v1/ops/customer-edits/{id}/approve");
+
+        Assert.Equal(HttpStatusCode.Conflict, secondApprove.StatusCode);
     }
 
     [Fact]
