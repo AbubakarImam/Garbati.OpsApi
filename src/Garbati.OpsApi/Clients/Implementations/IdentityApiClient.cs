@@ -59,6 +59,18 @@ public class IdentityApiClient(HttpClient httpClient) : IIdentityApiClient
             response, $"IdentityApi POST /v1/authorization/requests/{id}/approve", cancellationToken);
     }
 
+    // garbati-platform T-047. PatchAsJsonAsync is the same PATCH-with-body helper
+    // StaffIdentityApiClient.ChangeRoleAsync/ChangeStatusAsync and OrchestratorApi's own
+    // IdentityApiClient.RecordKycDecisionAsync already use against this same style of IdentityApi PATCH
+    // endpoint - not a new convention.
+    public async Task<CustomerResponse> UpdateCustomerDetailsAsync(
+        string customerId, UpdateCustomerDetailsRequest request, CancellationToken cancellationToken)
+    {
+        using var response = await httpClient.PatchAsJsonAsync($"v1/customers/{customerId}/details", request, cancellationToken);
+        return await ReadOrThrowAsync<CustomerResponse>(
+            response, $"IdentityApi PATCH /v1/customers/{customerId}/details", cancellationToken);
+    }
+
     private static async Task<T> ReadOrThrowAsync<T>(HttpResponseMessage response, string what, CancellationToken cancellationToken)
     {
         if (response.IsSuccessStatusCode)

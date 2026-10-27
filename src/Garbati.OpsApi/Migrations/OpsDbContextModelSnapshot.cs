@@ -28,6 +28,10 @@ namespace Garbati.OpsApi.Migrations
                         .HasColumnType("text")
                         .HasColumnName("id");
 
+                    b.Property<string>("ApplicationError")
+                        .HasColumnType("text")
+                        .HasColumnName("application_error");
+
                     b.Property<string>("ApprovedByStaffId")
                         .HasColumnType("text")
                         .HasColumnName("approved_by_staff_id");

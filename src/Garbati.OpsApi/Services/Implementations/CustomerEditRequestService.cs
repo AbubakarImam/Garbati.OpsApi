@@ -1,21 +1,21 @@
 using Garbati.OpsApi.Authorization;
+using Garbati.OpsApi.Clients.Interfaces;
 using Garbati.OpsApi.Data;
 using Garbati.OpsApi.Entities;
 using Garbati.OpsApi.Exceptions;
 using Garbati.OpsApi.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
+using IdentityContracts = Garbati.OpsApi.Clients.Contracts.Identity;
 
 namespace Garbati.OpsApi.Services.Implementations;
 
-// DESIGN.md Section 4.1 (garbati-platform T-034). STOPS AT Approved in this task - deliberately never
-// calls IIdentityApiClient at all, even though identity.customer.write is already granted to this
-// service's IdentityApi client for exactly this future step (that client's own interface comment already
-// says so). Applying the change via IdentityApi PATCH /v1/customers/{customerId}/details
-// (garbati-platform T-035) is a small, separate follow-up once that endpoint is confirmed built and
-// deployed - not this task's job (see the PR description for whether T-035 had merged by the time this
-// was written). This boundary is also enforced by what this class does NOT take as a constructor
-// dependency: no IIdentityApiClient here at all.
-public class CustomerEditRequestService(OpsDbContext dbContext) : ICustomerEditRequestService
+// DESIGN.md Section 4.1 (garbati-platform T-034/T-047). T-034 deliberately stopped at Approved, before
+// IdentityApi's PATCH /v1/customers/{customerId}/details existed. T-047 closes that gap the same way
+// ReversalRequestService.ApproveAsync already closed the identical gap for OpsReversalRequest (5.4) - see
+// that class's own comment for the shape this mirrors.
+public class CustomerEditRequestService(
+    OpsDbContext dbContext, IIdentityApiClient identityApiClient, ILogger<CustomerEditRequestService> logger)
+    : ICustomerEditRequestService
 {
     // Same cadence as OpsReversalRequest (DESIGN.md Section 5.1) - the task file leaves this choice open
     // ("unless you have a specific reason to choose differently") and no such reason applies here: a
@@ -94,12 +94,65 @@ public class CustomerEditRequestService(OpsDbContext dbContext) : ICustomerEditR
         EnsureDecidable(request, now);
         EnsureMakerChecker(request.RequestedByStaffId, approvingStaffId, approvingRole);
 
-        // Stops here - Approved is this task's deliberate terminal state (see this class's own comment
-        // above). No downstream call of any kind.
+        // Approval itself happens regardless of what the downstream call below does - set unconditionally,
+        // same as ReversalRequestService.ApproveAsync's identical lines.
         request.Status = OpsCustomerEditRequestStatus.Approved;
         request.ApprovedByStaffId = approvingStaffId;
         request.DecidedAt = now;
-        await dbContext.SaveChangesAsync(cancellationToken);
+
+        // No idempotency key here, unlike ReversalRequestService's deterministic "ops:{request.Id}" key
+        // for OrchestratorApi.ReverseAsync (DELIBERATE ASYMMETRY, task file explicit). A reversal moves
+        // money and must never execute twice. This PATCH is a plain setter - setting the same
+        // FullName/Email/PhoneNumber twice has the exact same end state as setting it once, so there is no
+        // "retry creates a duplicate" risk to guard against (the same reasoning IdentityApi's own
+        // UpdateCustomerDetailsRequest comment gives for not needing one either). EnsureDecidable above
+        // already rejects a second ApproveAsync call once this request has left PendingApproval - the same
+        // guard that already protects ReversalRequestService from a double-approve - so no additional gap
+        // exists here that an idempotency key would need to close.
+        IdentityContracts.CustomerResponse? result = null;
+        string? applicationError = null;
+        try
+        {
+            result = await identityApiClient.UpdateCustomerDetailsAsync(
+                request.TargetCustomerId,
+                new IdentityContracts.UpdateCustomerDetailsRequest(
+                    request.ProposedFullName, request.ProposedEmail, request.ProposedPhoneNumber),
+                cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            // Any error from the call - not just a specific type - is a failure to apply, recorded, never
+            // left to bubble as an opaque 500. Mirrors ReversalRequestService.ApproveAsync's identical
+            // catch for executionError.
+            applicationError = ex is DownstreamApiException downstream
+                ? $"IdentityApi returned {downstream.StatusCode}: {downstream.Message}"
+                : $"{ex.GetType().Name}: {ex.Message}";
+        }
+
+        if (result is not null)
+        {
+            request.Status = OpsCustomerEditRequestStatus.Applied;
+            request.ApplicationError = null;
+        }
+        else
+        {
+            request.Status = OpsCustomerEditRequestStatus.ApplicationFailed;
+            request.ApplicationError = applicationError;
+        }
+
+        // Mirrors ReversalRequestService.ApproveAsync's own principle: by this point the application
+        // outcome is already real and known - a failure to PERSIST that outcome must not mask it from our
+        // own caller. Logged, not rethrown; the in-memory request (returned below) still reflects the true
+        // outcome even if this particular save did not make it to the database.
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (Exception saveEx)
+        {
+            logger.LogError(saveEx,
+                "Customer-edit request {Id} reached {Status} but the result could not be saved.", request.Id, request.Status);
+        }
 
         return request;
     }

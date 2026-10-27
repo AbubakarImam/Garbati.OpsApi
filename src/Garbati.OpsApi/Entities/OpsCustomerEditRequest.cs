@@ -25,4 +25,11 @@ public class OpsCustomerEditRequest
 
     public DateTimeOffset RequestedAt { get; set; }
     public DateTimeOffset? DecidedAt { get; set; }
+
+    // garbati-platform T-047. Mirrors OpsReversalRequest.ExecutionDetail's role - populated only once
+    // IdentityApi PATCH /v1/customers/{customerId}/details has actually been called, on Approve, and only
+    // when that call failed (Status = ApplicationFailed). Null on Applied (success leaves no detail worth
+    // recording) and null on every other status. No equivalent to ExecutedReference is needed here - a
+    // detail-update has no reference/transaction id to record on success, unlike a reversal.
+    public string? ApplicationError { get; set; }
 }

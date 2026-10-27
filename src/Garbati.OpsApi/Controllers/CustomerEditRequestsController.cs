@@ -9,12 +9,11 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Garbati.OpsApi.Controllers;
 
-// DESIGN.md Section 4.1 (garbati-platform T-034): unlike reversals, ONLY CustomerServiceOfficer (own
+// DESIGN.md Section 4.1 (garbati-platform T-034/T-047): unlike reversals, ONLY CustomerServiceOfficer (own
 // requests) and Supervisor (everything) have any access to this endpoint group at all - every other
 // role, including Administrator, gets 403 at this class-level gate
-// (OpsRoles.CustomerServiceOfficerOrSupervisor). This workflow STOPS at Approved - see
-// Services/Implementations/CustomerEditRequestService.cs's own comment for why no action here ever calls
-// IdentityApi.
+// (OpsRoles.CustomerServiceOfficerOrSupervisor). Approve now actually applies the change via IdentityApi -
+// see Services/Implementations/CustomerEditRequestService.cs's own comment for the shape this mirrors.
 [ApiController]
 [Route("v1/ops/customer-edits")]
 [Authorize(Roles = OpsRoles.CustomerServiceOfficerOrSupervisor)]
@@ -85,5 +84,5 @@ public class CustomerEditRequestsController(ICustomerEditRequestService customer
 
     private static CustomerEditRequestResponse Map(OpsCustomerEditRequest r) => new(
         r.Id, r.TargetCustomerId, r.ProposedFullName, r.ProposedEmail, r.ProposedPhoneNumber, r.RequestedByStaffId,
-        r.Status, r.ApprovedByStaffId, r.RejectionReason, r.RequestedAt, r.DecidedAt);
+        r.Status, r.ApprovedByStaffId, r.RejectionReason, r.RequestedAt, r.DecidedAt, r.ApplicationError);
 }

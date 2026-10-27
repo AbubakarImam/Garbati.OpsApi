@@ -13,8 +13,12 @@ namespace Garbati.OpsApi.Clients.Interfaces;
 //
 // Deliberately absent: anything for identity.ops.reversal (that scope belongs to OrchestratorApi instead,
 // DESIGN.md decision #5 - this client has no method that could call it even if someone mistakenly granted
-// the scope) and anything for identity.customer.write/.kyc.manage/.mandate.*/.ops.freeze (none of groups
-// 1/4/5/6 need them).
+// the scope) and anything for .kyc.manage/.mandate.*/.ops.freeze (none of groups 1/2/4/5/6 need them).
+//
+// identity.customer.write is exercised by UpdateCustomerDetailsAsync below (garbati-platform T-047) -
+// granted since T-034 for exactly this future step, deliberately unused until now (see
+// CustomerEditRequestService.ApproveAsync's own comment for why that workflow previously stopped at
+// Approved).
 public interface IIdentityApiClient
 {
     Task<CustomerResponse?> GetCustomerAsync(string customerId, CancellationToken cancellationToken);
@@ -26,4 +30,7 @@ public interface IIdentityApiClient
 
     Task<PendingApprovalRequestResponse> ApproveAuthorizationRequestAsync(
         string id, ApproveRequest request, CancellationToken cancellationToken);
+
+    Task<CustomerResponse> UpdateCustomerDetailsAsync(
+        string customerId, UpdateCustomerDetailsRequest request, CancellationToken cancellationToken);
 }
