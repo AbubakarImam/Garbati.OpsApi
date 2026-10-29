@@ -1,7 +1,7 @@
 # Garbati.OpsApi — Design Document (v1, minimal)
 
-**Status:** Design v1 (minimal) — fully built. Foundation (`garbati-platform` T-033, `feat/foundation`, see Appendix A) plus both maker-checker workflows (`garbati-platform` T-034, `feat/reversal-and-customer-edit`, see Appendix B): `OpsReversalRequest` is fully executable end to end (5.4 below); `OpsCustomerEditRequest` deliberately stops at `Approved` pending `garbati-platform` T-035.
-**Last updated:** 21 October 2026
+**Status:** Design v1 (minimal) — fully built. Foundation (`garbati-platform` T-033, `feat/foundation`, see Appendix A) plus both maker-checker workflows (`garbati-platform` T-034, `feat/reversal-and-customer-edit`, see Appendix B): `OpsReversalRequest` is fully executable end to end (5.4 below); `OpsCustomerEditRequest` reaches `Applied`/`ApplicationFailed` on `Approved` (`garbati-platform` T-047, see Appendix C). `garbati-platform` T-052 (D-29, see Appendix D) added test-only regression coverage pinning that neither workflow has an edit path today — no production behaviour changed.
+**Last updated:** 29 October 2026
 **Service name:** `OpsApi` (`Garbati.OpsApi`)
 **Platform:** Garbati — see [`garbati-platform/ARCHITECTURE.md`](https://github.com/AbubakarImam/garbati-platform/blob/main/ARCHITECTURE.md) Section 2 (service map), Section 3.1 (ops-console dependency chain) and P-15. This document never repeats that file, only this service's detail.
 **Decision history:** `garbati-platform/TASKS.md` D-13 (ops console initiative), T-026 (`research/staff-ops-identity-patterns.md`), T-027 (`Garbati.StaffIdentityApi/docs/DESIGN.md` — the staff/role model this service authorizes against).
@@ -207,3 +207,44 @@ Built on `feature/apply-customer-edit`, on top of T-034's foundation. Confirmed 
 6. **Testing against the same hand-rolled `FakeIdentityApiClient` this repo's foundation already established**, extended with an `UpdateCustomerDetailsHandler`/`UpdateCustomerDetailsThrows` pair mirroring `FakeOrchestratorApiClient`'s existing `ReverseHandler`/`ReverseThrows` shape. Same limitation as every earlier appendix: this suite cannot catch a real drift in `Garbati.IdentityApi`'s actual deployed `PATCH /v1/customers/{customerId}/details` contract — `IdentityApiClientTests.UpdateCustomerDetailsAsync_SendsAPatchWithTheProposedFields` covers this client's own request-building against the real contract type read directly from `Garbati.IdentityApi`'s source, but nothing in this repo's own CI run calls a real, live `IdentityApi`.
 
 See the PR description for how this was tested, the full test count, and the LEARNING_LOG entry.
+
+## Appendix D. T-052 build notes (regression tests pinning "no edit path" for pending maker-checker requests)
+
+`garbati-platform` D-29: external feedback flagged a TOCTOU risk in the maker-checker flow — a checker
+could approve a request silently edited after they reviewed it. The coordinator investigated directly
+against this repo's real code and confirmed the risk has no path to exploit today: neither
+`OpsReversalRequest` nor `OpsCustomerEditRequest` has any edit/update endpoint or service method, so there
+is nothing a checker reviews that could be mutated after `CreateAsync` other than the terminal
+Approve/Reject transition itself. This task adds no production code — it is a test-only regression pin so
+that a future edit endpoint fails a test and forces a deliberate decision, rather than silently reopening
+the risk.
+
+Built on `feature/maker-checker-no-edit-regression-tests`. Judgment calls:
+
+1. **The task file's assumed method set was verified directly, not copied blindly.** Both
+   `IReversalRequestService` and `ICustomerEditRequestService` were read fresh from source before writing
+   any assertion; both still have exactly `CreateAsync`/`ListAsync`/`GetAsync`/`ApproveAsync`/`RejectAsync`
+   — unchanged since T-034/T-047, confirming the task file's claim rather than assuming it.
+2. **Two new test classes, split by what they reflect over**, matching the existing split between
+   `Controllers/` and `Clients/`-style structural tests already in this suite (`DownstreamClientScopeTests`
+   is the closest existing precedent for a reflection-based structural regression test):
+   `Controllers/MakerCheckerNoEditActionRegressionTests.cs` (no `[HttpPut]`/`[HttpPatch]` action on either
+   controller) and the new `Services/MakerCheckerServiceInterfaceRegressionTests.cs` (the closed method-
+   name set on either service interface).
+3. **The interface-level assertion uses an explicit `HashSet<string>.SetEquals`**, not `Assert.Equal` on an
+   ordered array (the shape `DownstreamClientScopeTests` already uses elsewhere in this repo) — the task
+   file is specific that this must be a closed-set equality check, and `SetEquals` makes that order-
+   independence explicit rather than relying on `GetMethods()`'s enumeration order being stable.
+4. **Regression-catching power proven, not just asserted.** A throwaway `[HttpPut]` action was added to
+   `ReversalRequestsController`, confirmed to fail `ReversalRequestsController_HasNoPutOrPatchAction` naming
+   the offending method, then reverted via `git checkout`. A throwaway method was added to
+   `ICustomerEditRequestService` (with a matching stub on `CustomerEditRequestService` so the build would
+   still succeed enough to run the test), confirmed to fail
+   `ICustomerEditRequestService_ExposesExactlyTheFiveKnownMethods` naming the unexpected method, then both
+   files were reverted via `git checkout`. `git diff origin/main -- src/` is empty — no throwaway change
+   reached any commit.
+5. **Out of scope, confirmed not touched:** no production code change of any kind survives this PR; no
+   "cancel my own pending request" endpoint was added (a separate, unrelated minor gap the investigation
+   also found); `Garbati.IdentityApi` was not touched (its equivalent is `garbati-platform` T-053).
+
+See the PR description for the full test run and the LEARNING_LOG entry.
