@@ -247,4 +247,19 @@ Built on `feature/maker-checker-no-edit-regression-tests`. Judgment calls:
    "cancel my own pending request" endpoint was added (a separate, unrelated minor gap the investigation
    also found); `Garbati.IdentityApi` was not touched (its equivalent is `garbati-platform` T-053).
 
+**Second round, same PR, same D-29 thread:** the same external reviewer followed up with a complementary
+ask — "a regression test can preserve that design choice: assert the request's content stays identical
+from creation through approval in each flow." The two reflection tests above prove STRUCTURALLY that no
+edit endpoint/method exists; they cannot catch a subtler bug where `ApproveAsync` itself accidentally
+reassigns a content field before saving, with no edit endpoint involved at all. Added
+`Controllers/MakerCheckerContentUnchangedThroughApprovalRegressionTests.cs`: a behavioural test per flow
+that creates a request with known field values, drives it through the real `Approve` action (same
+`ApiFixture`/`FakeOrchestratorApiClient`/`FakeIdentityApiClient` pattern every other `Approve` test in
+this repo already uses — no new mocking pattern), re-fetches by id, and asserts every content field is
+still exactly what was created. Proven to catch a real violation the same way: temporarily added
+`request.Amount = 1m;` right before `SaveChangesAsync` in `ReversalRequestService.ApproveAsync`, ran
+`ReversalRequest_ContentIsUnchanged_FromCreationThroughApproval`, confirmed it failed
+(`Expected: 777.50`, `Actual: 1`), then reverted via `git checkout`; `git diff origin/main -- src/` was
+empty again before committing the real test file. Total suite: 131 passed (129 + 2 new).
+
 See the PR description for the full test run and the LEARNING_LOG entry.
